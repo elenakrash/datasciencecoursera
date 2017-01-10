@@ -1,0 +1,157 @@
+---
+title: 'Qualitative activity recognition on weight lifting exercises'
+author: "Elena Krasheninnikova"
+date: "10/01/2017"
+output:
+  html_document: default
+  pdf_document:
+    latex_engine: xelatex
+---
+
+### Executive Summary
+
+One thing that people regularly do is quantify how much of a particular activity they do, 
+but they rarely quantify how well they do it. The goal of that project is using 
+data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants
+to predict the manner in which they did the exercise. 
+
+Six young health participants were asked to perform one set of 10 repetitions 
+of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according 
+to the specification (Class A), throwing the elbows to the front (Class B), 
+lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway 
+(Class D) and throwing the hips to the front (Class E).
+
+Class A corresponds to the specified execution of the exercise, while the other 4 classes 
+correspond to common mistakes. Participants were supervised by an experienced weight 
+lifter to make sure the execution complied to the manner they were supposed to simulate. 
+The exercises were performed by six male participants aged between 20-28 years, 
+with little weight lifting experience. All participants could easily simulate the mistakes 
+in a safe and controlled manner by using a relatively light dumbbell (1.25kg).
+
+### Load packages and data
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, results = 'hide'}
+suppressMessages(library(data.table)) # To manage data
+suppressMessages(library(lubridate)) # To manage dates
+suppressMessages(library(ggplot2))
+suppressMessages(library(grid))
+suppressMessages(library(lattice))
+suppressMessages(library(dplyr))
+suppressMessages(library(knitr))
+suppressMessages(library(scales))
+suppressMessages(library(caret))
+suppressMessages(library(e1071))
+suppressMessages(library(randomForest))
+suppressMessages(library(rattle))
+suppressMessages(library(party))
+suppressMessages(library(rpart))
+```
+
+The data contains mostly numerical features. However, many of them contain nonstandard 
+coded missing values. In addition to the standard NA, there are also empty strings "", 
+and error expressions "#DIV/0!". 
+
+Also there are several categorical variables: *user_name*, *new_window* and *classe*. 
+
+```{r, echo = FALSE, results = 'hide'}
+training <- read.csv("~/Desktop/Coursera/Practical Machine Learning/pml-training.csv", 
+                     row.names = 1, stringsAsFactors = FALSE, 
+                     na.strings = c("NA", "", "#DIV/0!")) %>% 
+  mutate(cvtd_timestamp = mdy_hm(cvtd_timestamp), 
+         user_name      = as.factor(user_name), 
+         new_window     = as.factor(new_window), 
+         classe         = as.factor(classe))
+
+testing <-  read.csv("~/Desktop/Coursera/Practical Machine Learning/pml-testing.csv", 
+                     row.names = 1, stringsAsFactors = FALSE, 
+                     na.strings = c("NA", "", "#DIV/0!")) %>% 
+  mutate(cvtd_timestamp = mdy_hm(cvtd_timestamp), 
+         user_name      = as.factor(user_name), 
+         new_window     = as.factor(new_window))
+```
+
+### Training and validation sets
+
+We separate data set (the contents of pml-training.csv) into a training set 
+containing 70% of the data, and a validation set containing 30% of the data. 
+All model selection uses the testing set only.
+
+```{r, echo = TRUE}
+set.seed(12345)
+trainIndex <- createDataPartition(y = training$classe, p = 0.7, list = FALSE)
+trainset <- training[trainIndex, ]
+validset <- training[-trainIndex, ]
+```
+
+### EDA
+
+There are a lot of missing values in some variables, we have to remove these features 
+before modeling. 
+
+```{r, echo = TRUE}
+missing <- is.na(trainset)
+good.columns <- names(which(colSums(missing) == 0))
+trainset <- trainset[, good.columns]
+validset <- validset[, good.columns]
+```
+
+### Modeling
+
+1. Rundom Forest using cross-validation. 
+
+```{r, echo = TRUE, results = 'hide'}
+set.seed(12345)
+fit.control.rf <- trainControl(method = "cv", number = 10, allowParallel = T, verbose = T)
+fit.rf <- train(classe ~ ., method = "rf", data = trainset, trControl = fit.control.rf, verbose = F)
+```
+
+```{r, echo = TRUE}
+pred.rf <- predict(fit.rf, validset)
+confusionMatrix(pred.rf, validset$classe)
+```
+
+2. Decision Trees.
+
+```{r, echo = TRUE}
+set.seed(12345)
+fit.dt <- rpart(classe ~ ., data = trainset, method = "class")
+pred.dt <- predict(fit.dt, validset, type = "class")
+confusionMatrix(pred.dt, validset$classe)
+```
+
+3. Gradient Boosted Machine using cross-validation. 
+
+```{r, echo = TRUE, results = 'hide', message=FALSE, warning=FALSE}
+set.seed(12345)
+fit.control.gbm <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+fit.gbm  <- train(classe ~ ., data = trainset, method = "gbm",
+                  trControl = fit.control.gbm, verbose = FALSE)
+```
+
+```{r, echo = TRUE}
+pred.gbm <- predict(fit.gbm, newdata = validset)
+confusionMatrix(pred.gbm, validset$classe)
+```
+
+4. Supported Vector Machine. 
+
+```{r, echo = TRUE}
+set.seed(12345)
+fit.svm <- svm(classe ~ ., data = trainset)
+pred.svm <- predict(fit.svm, validset)
+confusionMatrix(pred.svm, validset$classe)
+```
+
+### Final Model
+
+The final model is Random forest with accuracy of 0.9995. Let's apply the model 
+to the 20 unlabeled assignment cases.
+
+```{r, echo = TRUE}
+test <- predict(fit.rf, testing)
+test <- as.data.frame(test)
+test
+```
+
+
+
